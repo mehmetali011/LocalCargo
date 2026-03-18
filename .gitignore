@@ -1,0 +1,7 @@
+settings.json
+__pycache__/
+build/
+dist/
+release/
+*.spec
+.localcargo.pid

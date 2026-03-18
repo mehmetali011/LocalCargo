@@ -1,0 +1,90 @@
+name: Build LocalCargo Binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install watchdog cryptography pyinstaller
+
+      - name: Build executables
+        run: |
+          pyinstaller --noconfirm --clean --onefile --name LocalCargo localcargo.py
+          pyinstaller --noconfirm --clean --onefile --name LocalCargo-Stop localcargo_stop.py
+          pyinstaller --noconfirm --clean --onefile --name LocalCargo-Remove localcargo_remove.py
+
+      - name: Package zip
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib
+          import platform
+          import shutil
+          import zipfile
+
+          os_name = platform.system().lower()
+          suffix = {"windows": "windows", "linux": "linux", "darwin": "macos"}[os_name]
+          ext = ".exe" if os_name == "windows" else ""
+
+          release_dir = pathlib.Path("release")
+          package_dir = release_dir / f"LocalCargo-{suffix}"
+          package_dir.mkdir(parents=True, exist_ok=True)
+
+          dist = pathlib.Path("dist")
+          for name in ("LocalCargo", "LocalCargo-Stop", "LocalCargo-Remove"):
+              src = dist / f"{name}{ext}"
+              shutil.copy2(src, package_dir / src.name)
+
+          for extra in ("README.md",):
+              p = pathlib.Path(extra)
+              if p.exists():
+                  shutil.copy2(p, package_dir / p.name)
+
+          archive = release_dir / f"LocalCargo-{suffix}.zip"
+          archive.parent.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+              for path in package_dir.rglob("*"):
+                  zf.write(path, path.relative_to(package_dir.parent))
+          print(f"Created {archive}")
+          PY
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalCargo-${{ matrix.os }}
+          path: release/*.zip
+          if-no-files-found: error
+
+      - name: Upload release assets (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
