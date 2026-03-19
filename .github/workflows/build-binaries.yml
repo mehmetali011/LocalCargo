@@ -35,11 +35,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install watchdog cryptography pyinstaller
 
-      - name: Build executables
+      - name: Build executable
         run: |
           pyinstaller --noconfirm --clean --onefile --name LocalCargo localcargo.py
-          pyinstaller --noconfirm --clean --onefile --name LocalCargo-Stop localcargo_stop.py
-          pyinstaller --noconfirm --clean --onefile --name LocalCargo-Remove localcargo_remove.py
 
       - name: Package zip
         shell: bash
@@ -59,9 +57,10 @@ jobs:
           package_dir.mkdir(parents=True, exist_ok=True)
 
           dist = pathlib.Path("dist")
-          for name in ("LocalCargo", "LocalCargo-Stop", "LocalCargo-Remove"):
-              src = dist / f"{name}{ext}"
-              shutil.copy2(src, package_dir / src.name)
+          
+          # Sadece LocalCargo binary dosyasını alıyoruz
+          src = dist / f"LocalCargo{ext}"
+          shutil.copy2(src, package_dir / src.name)
 
           for extra in ("README.md",):
               p = pathlib.Path(extra)

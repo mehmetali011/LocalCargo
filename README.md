@@ -1,136 +1,76 @@
 # LocalCargo
 
-LocalCargo is a lightweight local-network file sync tool for peer-to-peer transfer between computers on the same LAN.
+**Secure, cross-platform, and blazing-fast local network folder synchronization.**
 
-It provides:
-- Automatic host discovery on local network
-- PIN-based secure setup flow
-- Optional end-to-end encryption (AES-256-CTR)
-- Folder watching and automatic file send
-- Receiver-side integrity checks for interrupted transfers
-- Cross-platform support (Windows, macOS, Linux)
+LocalCargo allows you to seamlessly sync directories between Windows, macOS, and Linux devices over your local network. It runs quietly in the background as a system daemon and uses AES-256 end-to-end encryption to keep your files safe.
 
-## How It Works
+## Features
 
-1. `setup.py` performs discovery + handshake and writes `settings.json`.
-2. `localcargo.py` manages setup/start/stop/remove and daemon lifecycle.
-3. Daemon mode starts both `sender.py` and `receiver.py` in background.
-4. `utils.py` tags downloaded files to prevent re-send loops.
+- **Cross-Platform:** Works natively on Windows, macOS, and Linux.
+- **Background Daemon:** Starts automatically on boot and runs silently in the background.
+- **End-to-End Encryption:** All file transfers are secured with AES-256-CTR encryption.
+- **Zero Configuration Hell:** An easy-to-use CLI wizard sets up everything for you.
+- **Self-Destruct Protocol:** A clean `remove` command that wipes all traces and zombie processes from your system.
 
-## mDNS and IP Changes
+---
+## Quick Start (For Users)
 
-LocalCargo is designed to reduce problems caused by changing local IP addresses:
-- Setup discovery announces hosts as `<hostname>.local`.
-- The saved `TARGET_HOST` is typically an mDNS hostname (for example `macbook.local`), not a raw IP.
-- At runtime, sender connects to `TARGET_HOST`; if mDNS resolves correctly on your system, DHCP IP changes should not break connectivity.
+You don't need Python or any dependencies to run LocalCargo. 
 
-Important note:
-- On some Windows systems, `.local` resolution requires Bonjour/mDNS support.
-
-## Project Structure
-
-- `setup.py`: device discovery, secure handshake, settings generation
-- `localcargo.py`: control plane (`start`, `stop`, `remove`, `setup`, `daemon`, menu)
-- `localcargo_stop.py`: stop wrapper for dedicated executable
-- `localcargo_remove.py`: remove wrapper for dedicated executable
-- `sender.py`: folder monitor + upload trigger
-- `cargo_handler.py`: file send pipeline + metadata + optional encryption
-- `receiver.py`: TCP receiver + metadata parsing + optional decryption
-- `utils.py`: settings validation + network file tagging
-- `crypto_utils.py`: key generation, encryptor/decryptor helpers
-
-## Requirements
-
-- Python 3.10+
-- Same local network for both devices
-- Python packages:
-  - `watchdog`
-  - `cryptography`
-
-Install dependencies:
+### Package Managers (Coming Soon)
+Once the project is published to official package repositories, you will be able to install it globally with a single command:
 
 ```bash
-python -m pip install --upgrade pip
-python -m pip install watchdog cryptography
+# Windows (Winget) - Work in progress
+# winget install localcargo
+
+# macOS / Linux (Homebrew) - Work in progress
+# brew install localcargo
 ```
 
-## Quick Start (Source Code)
+### Manual Installation
+1. Go to the [Releases](../../releases/latest) page and download the `.zip` file for your operating system.
+2. Extract the archive.
+3. Open your terminal in the extracted folder and run:
+   
+   ```bash
+   # Windows
+   .\LocalCargo.exe setup
+   
+   # macOS / Linux
+   ./LocalCargo setup
+   ```
+4. Follow the interactive wizard to pair your devices. That's it!
 
-Run these steps on both devices.
+> **Note on "Untrusted Publisher" Warnings:**
+> Because these executables are open-source and not signed with a paid developer certificate, your operating system's security features might flag them upon first run.
 
-1. Clone the repository.
-2. Install dependencies.
-3. Run setup:
+---
 
+## Commands
+
+Once installed and added to your system PATH, you can manage the LocalCargo daemon from anywhere using these CLI commands:
+
+| Command | Description |
+| :--- | :--- |
+| `localcargo start` | Starts the background sync daemon. |
+| `localcargo stop` | Suspends the background daemon safely. |
+| `localcargo status` | Checks if the daemon is currently running (shows PID). |
+| `localcargo remove` | Stops the service, removes autostart entries, and deletes the app. |
+| `localcargo setup` | Re-runs the initial pairing and configuration wizard. |
+| `localcargo menu` | Opens the interactive control panel. |
+
+---
+
+## For Developers (Build from Source)
+
+If you want to contribute, test the source code, or build the executables yourself:
+
+**1. Clone the repository**
 ```bash
-python setup.py
+git clone [https://github.com/mehmetali011/LocalCargo.git](https://github.com/mehmetali011/LocalCargo.git)
+cd LocalCargo
 ```
 
-4. Start background services:
-
-```bash
-python localcargo.py start
-```
-
-5. Stop services:
-
-```bash
-python localcargo.py stop
-```
-
-## CLI Commands
-
-```bash
-python localcargo.py start
-python localcargo.py stop
-python localcargo.py remove
-python localcargo.py setup
-python localcargo.py status
-python localcargo.py menu
-```
-
-## Configuration
-
-`settings.json` is generated by setup and validated at runtime.
-
-Example format:
-
-```json
-{
-  "TARGET_HOST": "my-other-device.local",
-  "PORT": 65432,
-  "BUFFER_SIZE": 4096,
-  "FOLDER": "./Shared",
-  "ENCRYPTION_ENABLED": true,
-  "ENCRYPTION_KEY": "BASE64_32_BYTE_KEY"
-}
-```
-
-## Build Click-to-Run Binaries (Win/macOS/Linux)
-
-This repository includes a GitHub Actions workflow:
-
-- `.github/workflows/build-binaries.yml`
-
-What it does:
-- Builds one-file executables with PyInstaller for Windows, macOS, and Linux
-- Produces:
-  - `LocalCargo` (start/setup/menu/cli)
-  - `LocalCargo-Stop`
-  - `LocalCargo-Remove`
-- Uploads zipped artifacts to the workflow run
-- On `v*` tags, also uploads zip files to GitHub Releases
-
-Run options:
-- Manual: `Actions -> Build LocalCargo Binaries -> Run workflow`
-- Release build: push a tag like `v1.0.0`
-
-## Troubleshooting
-
-- `settings.json is corrupted please re-configure.`
-  - Re-run `python setup.py` on the device.
-- Encrypted transfer error with disabled encryption:
-  - Ensure both devices use compatible `ENCRYPTION_ENABLED` and key settings.
-- Target unreachable:
-  - Verify both devices are online and on same LAN.
-  - Verify `.local` hostname resolves on your OS.
+## License
+This project is licensed under the MIT License.
