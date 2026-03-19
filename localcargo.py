@@ -577,13 +577,65 @@ def stop_services():
 
 
 def remove_system():
-    stop_services()
+    print("\n[!] Removing LocalCargo from the system...")
+    
+    # 1. Clean up autostart entries
     remove_autostart()
-    print(
-        "[OK] LocalCargo background services removed. "
-        "Project files and synced folders were not deleted."
-    )
-    return 0
+    
+    # 2. Gracefully stop known services
+    stop_services()
+
+    print("[*] Hunting zombies and preparing to delete the source code directory...")
+    print("[*] Terminal will close in 3 seconds. Goodbye!")
+
+    system = platform.system()
+    app_dir_str = str(APP_DIR)
+
+    if system == "Windows":
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        bat_path = os.path.join(temp_dir, "localcargo_nuke.bat")
+        
+        # Assassin BAT file for Windows
+        bat_content = f"""@echo off
+title LocalCargo Nuke Sequence
+echo [*] Waiting for LocalCargo to exit...
+timeout /T 2 /NOBREAK >nul
+echo [*] Cleaning up zombie processes...
+taskkill /F /IM {APP_NAME}.exe /T >nul 2>&1
+taskkill /F /IM localcargo.exe /T >nul 2>&1
+echo [*] Deleting source code directory: {app_dir_str}
+rmdir /S /Q "{app_dir_str}"
+echo [OK] All clean!
+del "%~f0"
+"""
+        with open(bat_path, "w", encoding="utf-8") as f:
+            f.write(bat_content)
+
+        # Launch the assassin in a new, independent console
+        subprocess.Popen(
+            ["cmd.exe", "/c", bat_path],
+            creationflags=subprocess.CREATE_NEW_CONSOLE | getattr(subprocess, "DETACHED_PROCESS", 0)
+        )
+
+    else:
+        # Assassin BASH command for Mac and Linux
+        # Writing [l]ocalcargo is a Unix trick. It prevents pkill from killing itself!
+        script = f"""
+        sleep 2
+        pkill -9 -f "[l]ocalcargo" >/dev/null 2>&1
+        rm -rf "{app_dir_str}"
+        """
+        # Launch the assassin detached from the current terminal (Daemonize) in the background
+        subprocess.Popen(
+            ["bash", "-c", script],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    # 3. Commit suicide immediately to release file locks!
+    sys.exit(0)
 
 
 def run_setup_only():
