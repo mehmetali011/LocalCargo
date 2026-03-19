@@ -20,20 +20,20 @@ You don't need Python or any dependencies to run LocalCargo.
 ### Package Managers
 
 **Windows (via Winget)**
-\`\`\`powershell
+```powershell
 winget install mehmetali011.LocalCargo
-\`\`\`
+```
 
 **macOS & Linux (via Homebrew)**
-\`\`\`bash
+```bash
 brew tap mehmetali011/tap
 brew install localcargo
-\`\`\`
+```
 
 **Linux (Native Quick Install)**
-\`\`\`bash
+```bash
 curl -sSL https://raw.githubusercontent.com/mehmetali011/LocalCargo/main/install.sh | bash
-\`\`\`
+````
 
 ### Manual Installation
 1. Go to the [Releases](../../releases/latest) page and download the `.zip` file for your operating system.
