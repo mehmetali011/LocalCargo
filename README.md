@@ -17,16 +17,23 @@ LocalCargo allows you to seamlessly sync directories between Windows, macOS, and
 
 You don't need Python or any dependencies to run LocalCargo. 
 
-### Package Managers (Coming Soon)
-Once the project is published to official package repositories, you will be able to install it globally with a single command:
+### Package Managers
 
-```bash
-# Windows (Winget) - Work in progress
-# winget install localcargo
+**Windows (via Winget)**
+\`\`\`powershell
+winget install mehmetali011.LocalCargo
+\`\`\`
 
-# macOS / Linux (Homebrew) - Work in progress
-# brew install localcargo
-```
+**macOS & Linux (via Homebrew)**
+\`\`\`bash
+brew tap mehmetali011/tap
+brew install localcargo
+\`\`\`
+
+**Linux (Native Quick Install)**
+\`\`\`bash
+curl -sSL https://raw.githubusercontent.com/mehmetali011/LocalCargo/main/install.sh | bash
+\`\`\`
 
 ### Manual Installation
 1. Go to the [Releases](../../releases/latest) page and download the `.zip` file for your operating system.
