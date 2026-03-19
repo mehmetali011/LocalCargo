@@ -4,7 +4,9 @@ import json
 import os
 import platform
 import random
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -235,38 +237,118 @@ def save_settings(target_host, port, folder, encryption_enabled, encryption_key)
     print("[*] Settings successfully saved.")
 
 
-def prompt_for_folder_path(default_path):
-    normalized_default = os.path.normpath(default_path)
-    root = None
+def _pick_folder_macos_osascript(initial_dir):
+    safe_initial_dir = initial_dir.replace("\\", "\\\\").replace('"', '\\"')
+    command = [
+        "/usr/bin/osascript",
+        "-e",
+        'tell application "Finder" to activate',
+        "-e",
+        f'set initialFolder to POSIX file "{safe_initial_dir}" as alias',
+        "-e",
+        "try",
+        "-e",
+        'set pickedFolder to POSIX path of (choose folder with prompt "Select LocalCargo Sync Folder" default location initialFolder)',
+        "-e",
+        "return pickedFolder",
+        "-e",
+        "on error number -128",
+        "-e",
+        'return ""',
+        "-e",
+        "end try",
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        stderr_text = result.stderr.strip() or "osascript failed"
+        raise RuntimeError(stderr_text)
+    return result.stdout.strip()
 
+
+def _pick_folder_windows_tk(initial_dir):
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
         root.withdraw()
-
-        if platform.system() == "Windows":
-            try:
-                root.attributes("-topmost", True)
-            except Exception:
-                pass
-        elif platform.system() == "Darwin":
-            os.system(
-                '''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "Python" to true' '''
-            )
-            try:
-                root.attributes("-topmost", True)
-            except Exception:
-                pass
-
-        print("\n[*] Please select the sync folder from the popup window...")
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
         root.update_idletasks()
         selected_folder = filedialog.askdirectory(
             title="Select LocalCargo Sync Folder",
-            initialdir=os.path.expanduser("~"),
+            initialdir=initial_dir,
             parent=root,
         )
+        return selected_folder.strip() if selected_folder else ""
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+
+def _pick_folder_linux_gui(initial_dir):
+    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if not has_display:
+        raise RuntimeError("No DISPLAY/WAYLAND session detected")
+
+    if shutil.which("zenity"):
+        result = subprocess.run(
+            [
+                "zenity",
+                "--file-selection",
+                "--directory",
+                "--title=Select LocalCargo Sync Folder",
+                f"--filename={os.path.join(initial_dir, '')}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        if result.returncode == 1:
+            return ""
+        raise RuntimeError(result.stderr.strip() or "zenity failed")
+
+    if shutil.which("kdialog"):
+        result = subprocess.run(
+            [
+                "kdialog",
+                "--getexistingdirectory",
+                initial_dir,
+                "Select LocalCargo Sync Folder",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        if result.returncode == 1:
+            return ""
+        raise RuntimeError(result.stderr.strip() or "kdialog failed")
+
+    raise RuntimeError("No supported Linux folder picker found (zenity/kdialog)")
+
+
+def prompt_for_folder_path(default_path):
+    normalized_default = os.path.normpath(default_path)
+    initial_dir = normalized_default if os.path.isdir(normalized_default) else os.path.expanduser("~")
+
+    try:
+        system = platform.system()
+        print("\n[*] Please select the sync folder from the popup window...")
+
+        if system == "Darwin":
+            selected_folder = _pick_folder_macos_osascript(initial_dir)
+        elif system == "Linux":
+            selected_folder = _pick_folder_linux_gui(initial_dir)
+        else:
+            selected_folder = _pick_folder_windows_tk(initial_dir)
 
         if selected_folder:
             normalized_selected = os.path.normpath(selected_folder)
@@ -276,12 +358,6 @@ def prompt_for_folder_path(default_path):
         print("[-] No folder selected. Falling back to manual input.")
     except Exception as e:
         print(f"[*] GUI not available ({e}). Falling back to manual input.")
-    finally:
-        if root is not None:
-            try:
-                root.destroy()
-            except Exception:
-                pass
 
     manual_path = input(
         f"\n[?] Enter folder path manually (Default: {normalized_default}): "
