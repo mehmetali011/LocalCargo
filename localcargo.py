@@ -615,7 +615,8 @@ del "%~f0"
         # Fix for WinError 87: Removed DETACHED_PROCESS, kept only CREATE_NEW_CONSOLE
         subprocess.Popen(
             ["cmd.exe", "/c", bat_path],
-            creationflags=subprocess.CREATE_NEW_CONSOLE
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            cwd=temp_dir,
         )
 
     else:
