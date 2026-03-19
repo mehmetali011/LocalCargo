@@ -8,10 +8,11 @@ echo "Extracting zip..."
 unzip -q -o LocalCargo-linux.zip
 
 echo "Installing..."
-sudo mv LocalCargo /usr/local/bin/localcargo
+sudo mv LocalCargo-linux/LocalCargo /usr/local/bin/localcargo
 sudo chmod +x /usr/local/bin/localcargo
 
 echo "Cleanup..."
 rm LocalCargo-linux.zip
+rm -rf LocalCargo-linux
 
 echo "✅ Setup completed! type localcargo to run."
