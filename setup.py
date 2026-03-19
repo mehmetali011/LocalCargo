@@ -34,6 +34,7 @@ def discovery_listener():
     """Answer discovery requests from other devices looking for Cargo hosts."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.bind(("", DISCOVERY_PORT))
     my_hostname = get_my_hostname()
 
@@ -47,27 +48,75 @@ def discovery_listener():
             pass
 
 
+def _candidate_broadcast_addresses():
+    candidates = {"255.255.255.255"}
+    local_ips = set()
+
+    try:
+        infos = socket.getaddrinfo(
+            socket.gethostname(), None, family=socket.AF_INET, type=socket.SOCK_DGRAM
+        )
+        for info in infos:
+            ip = info[4][0]
+            if ip and not ip.startswith("127."):
+                local_ips.add(ip)
+    except socket.gaierror:
+        pass
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            probe_ip = probe.getsockname()[0]
+            if probe_ip and not probe_ip.startswith("127."):
+                local_ips.add(probe_ip)
+    except OSError:
+        pass
+
+    for ip in local_ips:
+        parts = ip.split(".")
+        if len(parts) == 4:
+            parts[-1] = "255"
+            candidates.add(".".join(parts))
+
+    return sorted(candidates)
+
+
 def scan_network():
     """Scan local network for devices responding to Cargo discovery requests."""
     print("\n[*] Looking for Cargo hosts on the local network...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.settimeout(1.0)
+    sock.settimeout(0.35)
 
-    try:
-        sock.sendto(DISCOVERY_MAGIC, ("255.255.255.255", DISCOVERY_PORT))
-    except Exception as e:
-        print(f"[!] Broadcasting failed: {e}")
-        sock.close()
-        return []
+    broadcast_targets = _candidate_broadcast_addresses()
+    any_broadcast_sent = False
+
+    def send_discovery_broadcasts():
+        nonlocal any_broadcast_sent
+        for target in broadcast_targets:
+            try:
+                sock.sendto(DISCOVERY_MAGIC, (target, DISCOVERY_PORT))
+                any_broadcast_sent = True
+            except OSError:
+                continue
 
     found_hosts = []
     seen = set()
     my_hostname = get_my_hostname()
     try:
-        while True:
-            data, addr = sock.recvfrom(1024)
-            if data.startswith(b"CARGO_HOST:"):
+        for _ in range(3):
+            send_discovery_broadcasts()
+            round_deadline = time.time() + 1.0
+            while time.time() < round_deadline:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                except socket.timeout:
+                    break
+
+                if not data.startswith(b"CARGO_HOST:"):
+                    continue
+
                 hostname = data.split(b":", 1)[1].decode("utf-8")
                 host_ip = addr[0]
                 host_key = (hostname, host_ip)
@@ -75,10 +124,11 @@ def scan_network():
                     continue
                 seen.add(host_key)
                 found_hosts.append((hostname, host_ip))
-    except socket.timeout:
-        pass
     finally:
         sock.close()
+
+    if not any_broadcast_sent:
+        print("[!] Broadcasting failed on all network targets.")
 
     return found_hosts
 
@@ -372,8 +422,6 @@ def main():
     print("=" * 55)
     print(f"[*] The mDNS address of this computer: {get_my_hostname()}\n")
 
-    threading.Thread(target=discovery_listener, daemon=True).start()
-
     folder = prompt_for_folder_path("./Shared")
     port_input = input("[?] Port Number (Default: 65432): ").strip()
     port = int(port_input) if port_input.isdigit() else 65432
@@ -394,6 +442,12 @@ def main():
             hosts = scan_network()
             if not hosts:
                 print("  [-] No devices found. Scanning again in 1 second... (Ctrl+C to cancel)")
+                manual_target = input(
+                    "  [?] Enter target IP/hostname manually (or press Enter to rescan): "
+                ).strip()
+                if manual_target:
+                    selected_host = (manual_target, manual_target)
+                    break
                 time.sleep(1)
                 continue
 
@@ -413,6 +467,7 @@ def main():
         run_initiator(target_name, connect_host, folder, port, encryption_enabled)
 
     elif role == "2":
+        threading.Thread(target=discovery_listener, daemon=True).start()
         run_receiver(folder, port, encryption_enabled)
     else:
         print("[!] Invalid choice.")
