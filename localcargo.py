@@ -1,5 +1,6 @@
 import os
 import platform
+import shutil
 import signal
 import subprocess
 import sys
@@ -111,7 +112,7 @@ def _windows_startup_file():
         / "Programs"
         / "Startup"
     )
-    return startup_dir / f"{APP_NAME}.vbs"
+    return startup_dir / f"{APP_NAME}.cmd"
 
 
 def _mac_plist_path():
@@ -322,7 +323,10 @@ def _ensure_setup():
         return True
     print("[!] settings.json not found. Launching setup wizard...")
     setup_wizard.main()
-    return SETTINGS_PATH.exists()
+    setup_ok = SETTINGS_PATH.exists()
+    if setup_ok:
+        _prompt_add_to_path_after_setup()
+    return setup_ok
 
 
 def _ask_yes_no(prompt, default=True):
@@ -335,6 +339,171 @@ def _ask_yes_no(prompt, default=True):
     return answer in {"y", "yes"}
 
 
+def _normalize_path_entry(path_entry):
+    cleaned = path_entry.strip().strip('"').strip("'")
+    if not cleaned:
+        return ""
+    expanded = os.path.expanduser(os.path.expandvars(cleaned))
+    return os.path.normcase(os.path.normpath(expanded))
+
+
+def _path_contains(path_env, target_dir):
+    separator = ";" if platform.system() == "Windows" else ":"
+    normalized_target = _normalize_path_entry(str(target_dir))
+    if not normalized_target:
+        return False
+
+    for entry in path_env.split(separator):
+        if _normalize_path_entry(entry) == normalized_target:
+            return True
+    return False
+
+
+def _launcher_path():
+    if platform.system() == "Windows":
+        return APP_DIR / "localcargo.cmd"
+    return APP_DIR / "localcargo"
+
+
+def _ensure_localcargo_launcher():
+    launcher_path = _launcher_path()
+
+    if platform.system() == "Windows":
+        if getattr(sys, "frozen", False):
+            target = f'"{Path(sys.executable).resolve()}" %*'
+        else:
+            target = f'"{Path(sys.executable).resolve()}" "{Path(__file__).resolve()}" %*'
+        content = "@echo off\r\n" + target + "\r\n"
+        launcher_path.write_text(content, encoding="utf-8")
+        return launcher_path
+
+    if getattr(sys, "frozen", False):
+        target = f'exec "{Path(sys.executable).resolve()}" "$@"'
+    else:
+        target = f'exec "{Path(sys.executable).resolve()}" "{Path(__file__).resolve()}" "$@"'
+    content = "#!/usr/bin/env bash\n" + target + "\n"
+    launcher_path.write_text(content, encoding="utf-8")
+    launcher_path.chmod(launcher_path.stat().st_mode | 0o111)
+    return launcher_path
+
+
+def _add_to_windows_user_path(target_dir):
+    import winreg
+
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER,
+        r"Environment",
+        0,
+        winreg.KEY_READ | winreg.KEY_WRITE,
+    ) as key:
+        try:
+            current_path, reg_type = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            current_path, reg_type = "", winreg.REG_EXPAND_SZ
+
+        if not isinstance(current_path, str):
+            current_path = ""
+        if _path_contains(current_path, target_dir):
+            return False
+
+        new_path = f"{current_path};{target_dir}" if current_path else str(target_dir)
+        if reg_type not in {winreg.REG_SZ, winreg.REG_EXPAND_SZ}:
+            reg_type = winreg.REG_EXPAND_SZ
+        winreg.SetValueEx(key, "Path", 0, reg_type, new_path)
+
+    process_path = os.environ.get("PATH", "")
+    if not _path_contains(process_path, target_dir):
+        os.environ["PATH"] = f"{target_dir};{process_path}" if process_path else str(
+            target_dir
+        )
+
+    return True
+
+
+def _unix_profile_file():
+    shell_name = Path(os.environ.get("SHELL", "")).name.lower()
+    home = Path.home()
+
+    if shell_name == "zsh":
+        return home / ".zshrc"
+    if shell_name == "bash":
+        if platform.system() == "Darwin":
+            return home / ".bash_profile"
+        return home / ".bashrc"
+    return home / ".profile"
+
+
+def _add_to_unix_shell_path(target_dir):
+    profile_path = _unix_profile_file()
+    marker_start = "# >>> LocalCargo PATH >>>"
+    marker_end = "# <<< LocalCargo PATH <<<"
+    export_line = f'export PATH="{target_dir}:$PATH"'
+    block = f"{marker_start}\n{export_line}\n{marker_end}\n"
+
+    if profile_path.exists():
+        content = profile_path.read_text(encoding="utf-8")
+    else:
+        content = ""
+
+    already_in_profile = marker_start in content or any(
+        str(target_dir) in line and "PATH" in line for line in content.splitlines()
+    )
+    if already_in_profile:
+        changed = False
+    else:
+        prefix = "" if not content or content.endswith("\n") else "\n"
+        profile_path.write_text(content + prefix + block, encoding="utf-8")
+        changed = True
+
+    process_path = os.environ.get("PATH", "")
+    if not _path_contains(process_path, target_dir):
+        os.environ["PATH"] = f"{target_dir}:{process_path}" if process_path else str(
+            target_dir
+        )
+
+    return changed, profile_path
+
+
+def _enable_localcargo_terminal_command():
+    target_dir = APP_DIR
+    _ensure_localcargo_launcher()
+
+    if platform.system() == "Windows":
+        changed = _add_to_windows_user_path(target_dir)
+        if changed:
+            print(f"[+] Added to user PATH: {target_dir}")
+        else:
+            print("[*] LocalCargo path already exists in user PATH.")
+    else:
+        changed, profile_path = _add_to_unix_shell_path(target_dir)
+        if changed:
+            print(f"[+] Added PATH export to: {profile_path}")
+        else:
+            print(f"[*] PATH entry already exists in: {profile_path}")
+
+    if shutil.which("localcargo"):
+        print("[OK] `localcargo` command is available in this terminal.")
+    else:
+        print("[*] Open a new terminal and run: localcargo")
+
+
+def _prompt_add_to_path_after_setup():
+    if not sys.stdin.isatty():
+        return
+
+    should_add = _ask_yes_no(
+        "[?] Add LocalCargo to PATH so you can run `localcargo` in terminal? (y/N): ",
+        default=False,
+    )
+    if not should_add:
+        return
+
+    try:
+        _enable_localcargo_terminal_command()
+    except Exception as e:
+        print(f"[!] Failed to configure PATH: {e}")
+
+
 def start_services(ask_autostart=True):
     if not _ensure_setup():
         print("[!] Setup did not complete. Aborting start.")
@@ -345,16 +514,31 @@ def start_services(ask_autostart=True):
         print(f"[*] LocalCargo is already running (PID: {pid}).")
         return 0
 
-    should_enable_autostart = False
+    system = platform.system()
+
     if ask_autostart and not is_autostart_installed() and sys.stdin.isatty():
         should_enable_autostart = _ask_yes_no(
             "[?] Enable autostart on system boot? (Y/n): ", default=False
         )
+        if should_enable_autostart:
+            install_autostart()
+            if system != "Windows":
+                time.sleep(1)
+                running, pid = is_running()
+                if running:
+                    print(f"[OK] LocalCargo started by OS service (PID: {pid}).")
+                    return 0
+                
+    if is_autostart_installed():
+        if system == "Darwin":
+            subprocess.run(["launchctl", "load", str(_mac_plist_path())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        elif system == "Linux":
+            subprocess.run(["systemctl", "--user", "start", LINUX_SERVICE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
-    if should_enable_autostart:
-        install_autostart()
+    running, _ = is_running()
+    if not running:
+        _spawn_daemon_process()
 
-    _spawn_daemon_process()
     time.sleep(0.8)
     running, pid = is_running()
     if running:
@@ -366,6 +550,16 @@ def start_services(ask_autostart=True):
 
 
 def stop_services():
+    system = platform.system()
+
+    if is_autostart_installed():
+        if system == "Darwin":
+            subprocess.run(["launchctl", "unload", str(_mac_plist_path())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            print("[*] macOS service suspended.")
+        elif system == "Linux":
+            subprocess.run(["systemctl", "--user", "stop", LINUX_SERVICE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            print("[*] Linux service suspended.")
+
     running, pid = is_running()
     if not running:
         print("[*] LocalCargo is not running.")
@@ -395,6 +589,8 @@ def remove_system():
 def run_setup_only():
     stop_services()
     setup_wizard.main()
+    if SETTINGS_PATH.exists():
+        _prompt_add_to_path_after_setup()
     return 0
 
 
