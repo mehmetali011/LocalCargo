@@ -604,9 +604,10 @@ timeout /T 2 /NOBREAK >nul
 echo [*] Cleaning up zombie processes...
 taskkill /F /IM {APP_NAME}.exe /T >nul 2>&1
 taskkill /F /IM localcargo.exe /T >nul 2>&1
-echo [*] Deleting source code directory: {app_dir_str}
+wmic process where "name='python.exe' and CommandLine like '%%localcargo%%'" call terminate >nul 2>&1
+echo [*] Source code directory is being deleted: {app_dir_str}
 rmdir /S /Q "{app_dir_str}"
-echo [OK] All clean!
+echo [OK] Cleanup completed!
 del "%~f0"
 """
         with open(bat_path, "w", encoding="utf-8") as f:
