@@ -66,10 +66,9 @@ Once installed and added to your system PATH, you can manage the LocalCargo daem
 
 If you want to contribute, test the source code, or build the executables yourself:
 
-**1. Clone the repository**
+**Clone the repository**
 ```bash
-git clone [https://github.com/mehmetali011/LocalCargo.git](https://github.com/mehmetali011/LocalCargo.git)
-cd LocalCargo
+git clone https://github.com/mehmetali011/LocalCargo.git
 ```
 
 ## License

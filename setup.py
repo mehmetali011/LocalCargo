@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import platform
 import random
 import socket
 import sys
@@ -216,6 +217,52 @@ def save_settings(target_host, port, folder, encryption_enabled, encryption_key)
     print("[*] Settings successfully saved.")
 
 
+def prompt_for_folder_path(default_path):
+    normalized_default = os.path.normpath(default_path)
+    root = None
+
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+
+        if platform.system() == "Windows":
+            root.attributes("-topmost", True)
+        elif platform.system() == "Darwin":
+            os.system(
+                '''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "Python" to true' '''
+            )
+            root.attributes("-topmost", True)
+
+        print("\n[*] Please select the sync folder from the popup window...")
+        selected_folder = filedialog.askdirectory(
+            title="Select LocalCargo Sync Folder",
+            initialdir=os.path.expanduser("~"),
+        )
+
+        if selected_folder:
+            normalized_selected = os.path.normpath(selected_folder)
+            print(f"[+] Folder selected: {normalized_selected}")
+            return normalized_selected
+
+        print("[-] No folder selected. Falling back to manual input.")
+    except Exception:
+        print("[*] GUI not available. Falling back to manual input.")
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    manual_path = input(
+        f"\n[?] Enter folder path manually (Default: {normalized_default}): "
+    ).strip()
+    return os.path.normpath(manual_path) if manual_path else normalized_default
+
+
 # Main Menu
 def main():
     print("=" * 55)
@@ -225,7 +272,7 @@ def main():
 
     threading.Thread(target=discovery_listener, daemon=True).start()
 
-    folder = input("[?] Shared Folder Path (Default: ./Shared): ").strip() or "./Shared"
+    folder = prompt_for_folder_path("./Shared")
     port_input = input("[?] Port Number (Default: 65432): ").strip()
     port = int(port_input) if port_input.isdigit() else 65432
 
