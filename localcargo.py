@@ -612,10 +612,10 @@ del "%~f0"
         with open(bat_path, "w", encoding="utf-8") as f:
             f.write(bat_content)
 
-        # Launch the assassin in a new, independent console
+        # Fix for WinError 87: Removed DETACHED_PROCESS, kept only CREATE_NEW_CONSOLE
         subprocess.Popen(
             ["cmd.exe", "/c", bat_path],
-            creationflags=subprocess.CREATE_NEW_CONSOLE | getattr(subprocess, "DETACHED_PROCESS", 0)
+            creationflags=subprocess.CREATE_NEW_CONSOLE
         )
 
     else:
