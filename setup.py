@@ -60,13 +60,19 @@ def scan_network():
         return []
 
     found_hosts = []
+    seen = set()
+    my_hostname = get_my_hostname()
     try:
         while True:
             data, addr = sock.recvfrom(1024)
             if data.startswith(b"CARGO_HOST:"):
                 hostname = data.split(b":", 1)[1].decode("utf-8")
-                if hostname not in found_hosts and hostname != get_my_hostname():
-                    found_hosts.append(hostname)
+                host_ip = addr[0]
+                host_key = (hostname, host_ip)
+                if host_key in seen or hostname == my_hostname:
+                    continue
+                seen.add(host_key)
+                found_hosts.append((hostname, host_ip))
     except socket.timeout:
         pass
     finally:
@@ -104,8 +110,16 @@ def unwrap_master_key(iv_hex, ciphertext_b64, pin):
         return None
 
 
+def pick_reachable_host(hostname, fallback_ip):
+    try:
+        socket.getaddrinfo(hostname, SETUP_TCP_PORT, type=socket.SOCK_STREAM)
+        return hostname
+    except socket.gaierror:
+        return fallback_ip
+
+
 # Handshake and Setup
-def run_initiator(target_host, folder, port, encryption_enabled):
+def run_initiator(target_label, target_host, folder, port, encryption_enabled):
     """Initiator side: generate key, wrap with PIN, complete handshake."""
     master_key = generate_encryption_key()
     pin = str(random.randint(1000, 9999))
@@ -115,7 +129,7 @@ def run_initiator(target_host, folder, port, encryption_enabled):
     payload = f"{iv_hex}<SPLIT>{wrapped_key}<SPLIT>{initiator_hostname}".encode("utf-8")
 
     print(f"\n[!] Security Step: Enter this PIN on the other device: [ {pin} ]")
-    print(f"[*] Waiting for {target_host} to enter the PIN...")
+    print(f"[*] Waiting for {target_label} to enter the PIN...")
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -172,6 +186,8 @@ def run_receiver(folder, port, encryption_enabled):
             else:
                 raise ValueError("Invalid setup payload format.")
 
+            initiator_target = pick_reachable_host(initiator_host, initiator_ip)
+
             print(f"\n[+] {initiator_ip} sent a secure handshake request.")
             pin = input("    [?] Enter the 4-digit PIN from the other device: ").strip()
 
@@ -193,7 +209,9 @@ def run_receiver(folder, port, encryption_enabled):
 
             if decrypted_msg.decode("utf-8") == "PONG":
                 print("\n[OK] HANDSHAKE SUCCESSFUL! Devices locked with secure key.")
-                save_settings(initiator_host, port, folder, encryption_enabled, master_key)
+                save_settings(
+                    initiator_target, port, folder, encryption_enabled, master_key
+                )
             else:
                 print("    [!] Handshake failed.")
 
@@ -229,17 +247,25 @@ def prompt_for_folder_path(default_path):
         root.withdraw()
 
         if platform.system() == "Windows":
-            root.attributes("-topmost", True)
+            try:
+                root.attributes("-topmost", True)
+            except Exception:
+                pass
         elif platform.system() == "Darwin":
             os.system(
                 '''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "Python" to true' '''
             )
-            root.attributes("-topmost", True)
+            try:
+                root.attributes("-topmost", True)
+            except Exception:
+                pass
 
         print("\n[*] Please select the sync folder from the popup window...")
+        root.update_idletasks()
         selected_folder = filedialog.askdirectory(
             title="Select LocalCargo Sync Folder",
             initialdir=os.path.expanduser("~"),
+            parent=root,
         )
 
         if selected_folder:
@@ -248,8 +274,8 @@ def prompt_for_folder_path(default_path):
             return normalized_selected
 
         print("[-] No folder selected. Falling back to manual input.")
-    except Exception:
-        print("[*] GUI not available. Falling back to manual input.")
+    except Exception as e:
+        print(f"[*] GUI not available ({e}). Falling back to manual input.")
     finally:
         if root is not None:
             try:
@@ -287,8 +313,8 @@ def main():
 
     # Auto-rescan every second instead of asking for manual retry.
     if role == "1":
-        target_host = ""
-        while not target_host:
+        selected_host = None
+        while not selected_host:
             hosts = scan_network()
             if not hosts:
                 print("  [-] No devices found. Scanning again in 1 second... (Ctrl+C to cancel)")
@@ -296,14 +322,19 @@ def main():
                 continue
 
             print("\n  Discovered Devices:")
-            for i, host in enumerate(hosts, start=1):
-                print(f"  [{i}] {host}")
+            for i, (host_name, host_ip) in enumerate(hosts, start=1):
+                print(f"  [{i}] {host_name} ({host_ip})")
 
             choice = input(f"  [?] Select target device (1-{len(hosts)}): ").strip()
             if choice.isdigit() and 1 <= int(choice) <= len(hosts):
-                target_host = hosts[int(choice) - 1]
+                selected_host = hosts[int(choice) - 1]
 
-        run_initiator(target_host, folder, port, encryption_enabled)
+        target_name, target_ip = selected_host
+        connect_host = pick_reachable_host(target_name, target_ip)
+        if connect_host != target_name:
+            print(f"[*] Hostname unresolved on this device, using IP: {target_ip}")
+
+        run_initiator(target_name, connect_host, folder, port, encryption_enabled)
 
     elif role == "2":
         run_receiver(folder, port, encryption_enabled)
